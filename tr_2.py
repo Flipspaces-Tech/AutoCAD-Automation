@@ -1,15 +1,14 @@
-####2####
-
-
 #!/usr/bin/env python3
 # DXF → CSV + Google Sheets (Apps Script Web App)
 # - Aggregates INSERTs by (block_name, PLANNER, zone) using median bbox (L/W)
 # - Adds category1 = original DWG layer (kept in CSV & Detail; NOT sent to ByLayer)
 # - Zone detection from PLANNER (INSERT or closed LWPOLYLINE + best label)
 # - Layer totals with dominant color vote → ByLayer tab
-# - YOUR ASK:
-#   * Detail sheet removes perimeter & area
-#   * ByLayer sheet removes zone, category1, BOQ name, qty_value
+# - Detail sheet removes perimeter & area
+# - ByLayer sheet removes zone, category1, BOQ name, qty_value
+# - Upgrades:
+#     * Oriented (angle-aware) bbox for INSERT length/width
+#     * Safe handling of $INSUNITS=0 via --unitless-units
 
 from __future__ import annotations
 import argparse, csv, uuid, time, math, logging, io, base64
@@ -37,19 +36,16 @@ GSHEET_MODE         = "replace"
 GS_DRIVE_FOLDER_ID  = "" 
 
 # ========== Headers ==========
-# Master CSV headers (for on-disk CSV/debug; keeps everything)
 CSV_HEADERS = [
     "entity_type","category","zone","category1",
     "BOQ name","qty_type","qty_value","length (ft)","width (ft)","perimeter","area (ft2)","Preview","remarks"
 ]
 
-# Detail (blocks) sheet → perimeter & area REMOVED
 DETAIL_HEADERS = [
     "entity_type","category","zone","category1",
     "BOQ name","qty_type","qty_value","length (ft)","width (ft)","Preview","remarks"
 ]
 
-# ByLayer sheet → zone, category1, BOQ name, qty_value REMOVED
 LAYER_HEADERS = [
     "entity_type","category","qty_type","length (ft)","width (ft)","perimeter","area (ft2)","Preview","remarks"
 ]
@@ -67,17 +63,32 @@ def layer_or_misc(name: str) -> str:
     s = (name or "").strip()
     return s if s else "misc"
 
-def units_scale_to_meters(doc) -> float:
+def units_scale_to_meters(doc, unitless_units: str = "m") -> float:
+    """Meters per drawing unit. Unitless drawings use --unitless-units (default m)."""
     try:
-        code = int(doc.header.get("$INSUNITS", 0))
+        code = int(doc.header.get("$INSUNITS", 0) or 0)
     except Exception:
         code = 0
-    mapping = {0:0.001, 1:0.0254, 2:0.3048, 4:0.001, 5:0.01, 6:1.0}
-    scale = mapping.get(code, 1.0)
-    if code not in mapping:
-        logging.warning("Unrecognized $INSUNITS=%s; assuming meters.", code)
-    else:
+
+    mapping = {
+        1: 0.0254,   # inches → m
+        2: 0.3048,   # feet   → m
+        4: 0.001,    # mm     → m
+        5: 0.01,     # cm     → m
+        6: 1.0,      # m      → m
+    }
+
+    if code in mapping:
+        scale = mapping[code]
         logging.info("Detected $INSUNITS=%s → %s m/unit", code, scale)
+        return scale
+
+    unitless_map = {"m":1.0, "cm":0.01, "mm":0.001, "in":0.0254, "ft":0.3048}
+    scale = unitless_map.get((unitless_units or "m").lower().strip(), 1.0)
+    logging.warning(
+        "Unitless/unknown $INSUNITS=%s. Assuming %s per unit → %s m/unit.",
+        code, unitless_units, scale
+    )
     return scale
 
 def to_target_units(v_m: float, target: str, kind: str) -> float:
@@ -193,23 +204,74 @@ def _collect_points_from_entity(e):
                         x = float(getattr(v, "x", v[0])); y = float(getattr(v, "y", v[1]))
                         yield (x, y)
 
+# ===== Oriented bbox helpers =====
+def _convex_hull(points: list[tuple[float,float]]) -> list[tuple[float,float]]:
+    pts = sorted(set(points))
+    if len(pts) <= 1:
+        return pts
+    def cross(o,a,b): return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
+    lower=[]
+    for p in pts:
+        while len(lower)>=2 and cross(lower[-2],lower[-1],p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper=[]
+    for p in reversed(pts):
+        while len(upper)>=2 and cross(upper[-2],upper[-1],p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+def _oriented_bbox_lengths(points: list[tuple[float,float]]) -> tuple[float,float]:
+    """Return (L, W) of the minimum-area rectangle enclosing points (object-aligned)."""
+    if not points:
+        return (0.0, 0.0)
+    hull = _convex_hull(points)
+    if len(hull) == 1:
+        return (0.0, 0.0)
+    if len(hull) == 2:
+        a,b = hull[0], hull[1]
+        d = math.hypot(b[0]-a[0], b[1]-a[1])
+        return (d, 0.0)
+
+    def proj_extents(pts, cos_t, sin_t):
+        xs = []; ys = []
+        for x,y in pts:
+            xr =  x*cos_t + y*sin_t
+            yr = -x*sin_t + y*cos_t
+            xs.append(xr); ys.append(yr)
+        return (min(xs), max(xs), min(ys), max(ys))
+
+    best_area = float("inf"); best_dims=(0.0,0.0)
+    n = len(hull)
+    for i in range(n):
+        x1,y1 = hull[i]; x2,y2 = hull[(i+1)%n]
+        dx,dy = (x2-x1, y2-y1)
+        edge_len = math.hypot(dx,dy)
+        if edge_len < 1e-12:
+            continue
+        cos_t = dx/edge_len
+        sin_t = dy/edge_len
+        minx,maxx,miny,maxy = proj_extents(hull, cos_t, sin_t)
+        w = maxx - minx
+        h = maxy - miny
+        area = w*h
+        if area < best_area:
+            best_area = area
+            L,W = (w,h) if w>=h else (h,w)
+            best_dims = (L,W)
+    return best_dims
+
 def _bbox_of_insert_xy(ins) -> Optional[Tuple[float,float]]:
+    """Return oriented (L,W) using minimum-area rectangle of all virtual-entity points."""
     try:
-        minx=miny=float("inf"); maxx=maxy=float("-inf")
+        pts = []
         for ve in ins.virtual_entities():
-            got_any = False
-            for (x, y) in _collect_points_from_entity(ve) or []:
-                got_any = True
-                minx = min(minx, x); miny = min(miny, y)
-                maxx = max(maxx, x); maxy = max(maxy, y)
-            if not got_any:
-                continue
-        if minx == float("inf"):
+            for p in _collect_points_from_entity(ve) or []:
+                pts.append((float(p[0]), float(p[1])))
+        if not pts:
             return None
-        dx = max(0.0, maxx - minx)
-        dy = max(0.0, maxy - miny)
-        L = max(dx, dy)
-        W = min(dx, dy)
+        L, W = _oriented_bbox_lengths(pts)
         return (L, W)
     except Exception:
         return None
@@ -808,9 +870,7 @@ def make_layer_total_rows(open_by, peri_by, area_by, layer_rgb: Dict[str, tuple[
 
 # ===== I/O =====
 def write_csv(rows: list[dict], out_path: Path) -> None:
-    # Find the exact header labels for length/width/area from CSV_HEADERS
     def _find(hint: str) -> str:
-        # pick the first header containing the hint (case-insensitive)
         for h in CSV_HEADERS:
             if hint.lower() in h.lower():
                 return h
@@ -879,28 +939,26 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
         is_layer = (chunk[0].get("entity_type") == "LAYER_SUMMARY")
 
         if is_layer:
-            # ===== ByLayer sheet: zone, category1, BOQ name, qty_value REMOVED
             headers = LAYER_HEADERS
             data_rows = [[
                 r.get("entity_type",""),
-                r.get("layer",""),           # category
+                r.get("layer",""),
                 r.get("qty_type",""),
                 r.get("bbox_length",""),
                 r.get("bbox_width",""),
                 r.get("perimeter",""),
                 r.get("area",""),
-                "",                          # Preview (color cell handled separately)
+                "",
                 r.get("remarks",""),
             ] for r in chunk]
-            images     = [""] * len(chunk)                      # no images
+            images     = [""] * len(chunk)
             bg_colors  = [r.get("preview_hex","") for r in chunk]
             color_only = True
         else:
-            # ===== Detail sheet: perimeter & area REMOVED
             headers = DETAIL_HEADERS
             data_rows = [[
                 r.get("entity_type",""),
-                r.get("layer",""),          # category
+                r.get("layer",""),
                 r.get("zone",""),
                 r.get("category1",""),
                 r.get("block_name",""),
@@ -908,7 +966,7 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
                 r.get("qty_value",""),
                 r.get("bbox_length",""),
                 r.get("bbox_width",""),
-                "",                         # Preview (image written by Web App)
+                "",
                 r.get("remarks",""),
             ] for r in chunk]
             images     = [r.get("preview_b64","") for r in chunk]
@@ -989,11 +1047,12 @@ def split_rows_for_upload(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 def process_one_dxf(dxf_path: Path, out_dir: Path | None,
                     target_units: str, include_xrefs: bool,
                     layer_metrics: bool, aggregate_inserts: bool,
-                    layer_metrics_mode: str) -> list[dict]:
+                    layer_metrics_mode: str, unitless_units: str) -> list[dict]:
     logging.info("Processing DXF: %s", dxf_path)
 
     doc = ezdxf.readfile(str(dxf_path)); msp = doc.modelspace()
-    scale_to_m = units_scale_to_meters(doc)
+    logging.info("DWG $INSUNITS: %s", doc.header.get("$INSUNITS", "n/a"))
+    scale_to_m = units_scale_to_meters(doc, unitless_units=unitless_units)
 
     preview_cache = _build_preview_cache(msp)
     zones = _collect_planner_zones(msp)
@@ -1059,6 +1118,8 @@ def main():
     ap.add_argument("--align-middle", action="store_true")
     ap.add_argument("--sparse-anchor", choices=["first","last","middle"], default="last")
     ap.add_argument("--drive-folder-id", default=None)
+    ap.add_argument("--unitless-units", choices=["m","cm","mm","in","ft"], default="m",
+                    help="Interpretation for $INSUNITS=0 drawings (default m/unit).")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -1100,7 +1161,8 @@ def main():
             logging.error("--out is for a single file. For folders, use --out-dir."); return
         f = files[0]
         rows = process_one_dxf(f, explicit_out.parent, args.target_units, args.include_xrefs,
-                               layer_metrics, aggregate_inserts, args.layer_metrics_mode)
+                               layer_metrics, aggregate_inserts, args.layer_metrics_mode,
+                               unitless_units=args.unitless_units)
         explicit_out.parent.mkdir(parents=True, exist_ok=True)
         write_csv(rows, explicit_out)
 
@@ -1122,7 +1184,8 @@ def main():
     for f in files:
         try:
             rows = process_one_dxf(f, out_dir, args.target_units, args.include_xrefs,
-                                   layer_metrics, aggregate_inserts, args.layer_metrics_mode)
+                                   layer_metrics, aggregate_inserts, args.layer_metrics_mode,
+                                   unitless_units=args.unitless_units)
             all_rows.extend(rows or [])
         except Exception as ex:
             logging.exception("Failed processing %s: %s", f, ex)

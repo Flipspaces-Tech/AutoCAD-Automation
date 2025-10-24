@@ -1,3 +1,7 @@
+##2##
+
+
+
 #!/usr/bin/env python3
 # DXF → CSV + Google Sheets (Apps Script Web App)
 # - Aggregates INSERTs by (block_name, PLANNER, zone) using median bbox (L/W)

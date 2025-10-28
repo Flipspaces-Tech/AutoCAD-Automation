@@ -1,3 +1,7 @@
+##2##
+
+
+
 #!/usr/bin/env python3
 # DXF → CSV + Google Sheets (Apps Script Web App)
 # - Aggregates INSERTs by (block_name, PLANNER, zone) using median bbox (L/W)
@@ -9,10 +13,6 @@
 # - Upgrades:
 #     * Oriented (angle-aware) bbox for INSERT length/width
 #     * Safe handling of $INSUNITS=0 via --unitless-units
-#     * Description column:
-#         - Prefer ATTRIB tags: DESC / DESCRIPTION / NOTE / REM / REMARK / INFO
-#         - Fallback to BlockRecord.dxf.description
-#         - Last resort to ATTDEF default text in the block definition
 
 from __future__ import annotations
 import argparse, csv, uuid, time, math, logging, io, base64
@@ -37,27 +37,17 @@ GSHEET_ID           = "12AsC0b7_U4dxhfxEZwtrwOXXALAnEEkQm5N8tg_RByM"
 GSHEET_TAB          = "CRED_UPDATED"
 GSHEET_SUMMARY_TAB  = ""       # blank → auto "<GSHEET_TAB>_ByLayer"
 GSHEET_MODE         = "replace"
-GS_DRIVE_FOLDER_ID  = ""
-
-# Which attribute tags we consider as "description"
-DESC_TAGS = {"DESC", "DESCRIPTION", "NOTE", "REM", "REMARK", "INFO", "META_DESC"}
-
+GS_DRIVE_FOLDER_ID  = "" 
 
 # ========== Headers ==========
 CSV_HEADERS = [
     "entity_type","category","zone","category1",
-    "BOQ name","qty_type","qty_value",
-    "length (ft)","width (ft)","perimeter","area (ft2)",
-    "Description",               # <— NEW column wired through CSV + Sheet
-    "Preview","remarks"
+    "BOQ name","qty_type","qty_value","length (ft)","width (ft)","perimeter","area (ft2)","Preview","remarks"
 ]
 
 DETAIL_HEADERS = [
     "entity_type","category","zone","category1",
-    "BOQ name","qty_type","qty_value",
-    "length (ft)","width (ft)",
-    "Description",               # <— appears in Detail tab before Preview
-    "Preview","remarks"
+    "BOQ name","qty_type","qty_value","length (ft)","width (ft)","Preview","remarks"
 ]
 
 LAYER_HEADERS = [
@@ -69,23 +59,40 @@ DEC_PLACES = 2
 FORCE_PLANNER_CATEGORY = True
 
 # ===== Utilities =====
+def make_run_id() -> str:
+    ts = time.strftime("%Y%m%d-%H%M"); rnd = uuid.uuid4().hex[:6]
+    return f"r{ts}-{rnd}"
+
 def layer_or_misc(name: str) -> str:
     s = (name or "").strip()
     return s if s else "misc"
 
 def units_scale_to_meters(doc, unitless_units: str = "m") -> float:
+    """Meters per drawing unit. Unitless drawings use --unitless-units (default m)."""
     try:
         code = int(doc.header.get("$INSUNITS", 0) or 0)
     except Exception:
         code = 0
-    mapping = {1:0.0254, 2:0.3048, 4:0.001, 5:0.01, 6:1.0}
+
+    mapping = {
+        1: 0.0254,   # inches → m
+        2: 0.3048,   # feet   → m
+        4: 0.001,    # mm     → m
+        5: 0.01,     # cm     → m
+        6: 1.0,      # m      → m
+    }
+
     if code in mapping:
         scale = mapping[code]
         logging.info("Detected $INSUNITS=%s → %s m/unit", code, scale)
         return scale
+
     unitless_map = {"m":1.0, "cm":0.01, "mm":0.001, "in":0.0254, "ft":0.3048}
     scale = unitless_map.get((unitless_units or "m").lower().strip(), 1.0)
-    logging.warning("Unitless/unknown $INSUNITS=%s. Assuming %s per unit → %s m/unit.", code, unitless_units, scale)
+    logging.warning(
+        "Unitless/unknown $INSUNITS=%s. Assuming %s per unit → %s m/unit.",
+        code, unitless_units, scale
+    )
     return scale
 
 def to_target_units(v_m: float, target: str, kind: str) -> float:
@@ -220,6 +227,7 @@ def _convex_hull(points: list[tuple[float,float]]) -> list[tuple[float,float]]:
     return lower[:-1] + upper[:-1]
 
 def _oriented_bbox_lengths(points: list[tuple[float,float]]) -> tuple[float,float]:
+    """Return (L, W) of the minimum-area rectangle enclosing points (object-aligned)."""
     if not points:
         return (0.0, 0.0)
     hull = _convex_hull(points)
@@ -259,6 +267,7 @@ def _oriented_bbox_lengths(points: list[tuple[float,float]]) -> tuple[float,floa
     return best_dims
 
 def _bbox_of_insert_xy(ins) -> Optional[Tuple[float,float]]:
+    """Return oriented (L,W) using minimum-area rectangle of all virtual-entity points."""
     try:
         pts = []
         for ve in ins.virtual_entities():
@@ -340,6 +349,7 @@ class Zone:
 
 def _collect_planner_zones(msp) -> list[Zone]:
     zones: list[Zone] = []
+    # A) PLANNER INSERTs: bbox polygon & name from ATTRIB or block name
     for ins in msp.query('INSERT[layer=="PLANNER"]'):
         try:
             b = _insert_bbox(ins)
@@ -362,6 +372,7 @@ def _collect_planner_zones(msp) -> list[Zone]:
             zones.append(Zone(name=zname, poly=poly))
         except Exception:
             pass
+
     if zones:
         seen = set(); out=[]
         for z in zones:
@@ -370,6 +381,7 @@ def _collect_planner_zones(msp) -> list[Zone]:
                 out.append(z); seen.add(key)
         return out
 
+    # B) Closed PLANNER LWPOLYLINEs + nearest label
     tmp: list[Zone] = []
     for e in msp.query('LWPOLYLINE[layer=="PLANNER"]'):
         try:
@@ -423,8 +435,7 @@ def make_row(entity_type, qty_type, qty_value,
              block_name="", layer="", handle="", remarks="",
              bbox_length=None, bbox_width=None,
              preview_b64:str="", preview_hex:str="",
-             perimeter=None, area=None, zone:str="", category1:str="",
-             description:str="") -> dict:
+             perimeter=None, area=None, zone:str="", category1:str="") -> dict:
     return {
         "entity_type": entity_type, "qty_type": qty_type,
         "qty_value": _fmt_num(qty_value),
@@ -439,7 +450,6 @@ def make_row(entity_type, qty_type, qty_value,
         "preview_hex": preview_hex or "",
         "perimeter": _fmt_num(perimeter),
         "area": _fmt_num(area),
-        "description": description or ""
     }
 
 # ===== Previews (Detail) =====
@@ -645,44 +655,6 @@ def _dominant_layer_rgb_map(msp, base_layer_rgb: Dict[str, tuple[int,int,int]], 
             out[ly] = max(hist.items(), key=lambda kv: kv[1])[0]
     return out
 
-# ===== Description helpers =====
-def _description_from_insert(ins) -> str:
-    """Prefer INSERT attributes with tags in DESC_TAGS."""
-    try:
-        for att in getattr(ins, "attribs", lambda: [])() or []:
-            tag = (getattr(att.dxf, "tag", "") or "").upper()
-            if tag in DESC_TAGS:
-                txt = (getattr(att.dxf, "text", "") or "").strip()
-                if txt:
-                    return txt
-    except Exception:
-        pass
-    return ""
-
-def _description_from_blockrecord(msp, base_name: str) -> str:
-    """Fallback to BlockRecord.dxf.description."""
-    try:
-        if base_name and hasattr(msp, "doc") and base_name in msp.doc.blocks:
-            blkrec = msp.doc.blocks.get(base_name)
-            return (getattr(getattr(blkrec, "dxf", None), "description", "") or "").strip()
-    except Exception:
-        pass
-    return ""
-
-def _attdef_default_for_desc(msp, base_name: str) -> str:
-    """Last resort: ATTDEF default text for any tag in DESC_TAGS within the block definition."""
-    try:
-        if base_name and hasattr(msp, "doc") and base_name in msp.doc.blocks:
-            blk = msp.doc.blocks.get(base_name)
-            for e in blk:
-                if e.dxftype() == "ATTDEF":
-                    tag = (getattr(e.dxf, "tag", "") or "").upper()
-                    if tag in DESC_TAGS:
-                        return (getattr(e.dxf, "text", "") or "").strip()
-    except Exception:
-        pass
-    return ""
-
 # ===== Rows: INSERT detail =====
 def iter_block_rows(msp, include_xrefs: bool,
                     scale_to_m: float, target_units: str,
@@ -692,25 +664,11 @@ def iter_block_rows(msp, include_xrefs: bool,
     for ins in msp.query("INSERT"):
         try:
             ly = getattr(ins.dxf, "layer", "")
-            if layer_or_misc(ly).upper() == "PLANNER":
+            if layer_or_misc(ly).upper() == "PLANNER":  # skip zone rectangles
                 continue
-
-            # Block names
             name = getattr(ins, "effective_name", None) or getattr(ins, "block_name", None) or getattr(ins.dxf, "name", "")
-            base_name = name
-            if not include_xrefs and ("|" in (name or "")):
+            if not include_xrefs and ("|" in (name or "")):  # skip xrefs
                 continue
-
-            # -------- Description (multi-fallback) --------
-            desc_txt = _description_from_insert(ins)
-            if not desc_txt:
-                desc_txt = _description_from_blockrecord(msp, base_name)
-            if not desc_txt:
-                desc_txt = _attdef_default_for_desc(msp, base_name)
-            logging.debug("Block %s → description: %r", name, desc_txt)
-            # ----------------------------------------------
-
-            # Dimensions (object-aligned bbox)
             bbox_du = _bbox_of_insert_xy(ins)
             if bbox_du:
                 L_m = bbox_du[0] * scale_to_m; W_m = bbox_du[1] * scale_to_m
@@ -719,7 +677,6 @@ def iter_block_rows(msp, include_xrefs: bool,
             else:
                 L_out = W_out = None
 
-            # Zone by center point
             center_zone = ""
             b = _insert_bbox(ins)
             if b:
@@ -740,8 +697,7 @@ def iter_block_rows(msp, include_xrefs: bool,
                 preview_b64=preview_cache.get(name, ""),
                 zone=center_zone,
                 category1=(ly or "").strip().lower(),
-                remarks=remarks_txt,
-                description=desc_txt
+                remarks=remarks_txt
             ))
         except Exception as ex:
             logging.exception("INSERT failed: %s", ex)
@@ -779,7 +735,7 @@ def compute_layer_metrics(msp, scale_to_m: float, target_units: str):
 
     for e in msp.query("LWPOLYLINE"):
         try:
-            verts = list(e)
+            verts = list(e); 
             if not verts: continue
             closed = bool(getattr(e,"closed",False))
             dense=[]; n=len(verts)
@@ -936,7 +892,6 @@ def write_csv(rows: list[dict], out_path: Path) -> None:
     CAT_COL    = _find("category")
     ZONE_COL   = _find("zone")
     CAT1_COL   = _find("category1")
-    DESC_COL   = _find("description")
     REM_COL    = _find("remarks")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -956,7 +911,6 @@ def write_csv(rows: list[dict], out_path: Path) -> None:
                 WIDTH_COL:  r.get("bbox_width",""),
                 PERI_COL:   r.get("perimeter",""),
                 AREA_COL:   r.get("area",""),
-                DESC_COL:   r.get("description",""),
                 PREV_COL:   "",  # preview images handled by Web App
                 REM_COL:     r.get("remarks",""),
             })
@@ -1016,7 +970,6 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
                 r.get("qty_value",""),
                 r.get("bbox_length",""),
                 r.get("bbox_width",""),
-                r.get("description",""),   # <— Description value to Sheet
                 "",
                 r.get("remarks",""),
             ] for r in chunk]
@@ -1048,6 +1001,13 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
             raise RuntimeError(f"WebApp upload failed (batch {idx}): HTTP {r.status_code} {r.text}")
         sent += len(data_rows)
         logging.info("WebApp batch %d: uploaded %d/%d rows", idx, sent, total)
+
+# ===== Misc helpers =====
+def print_summary(rows: list[dict], out_path: Path) -> None:
+    total_insert_groups = sum(1 for r in rows if r["entity_type"]=="INSERT" and r["qty_type"]=="count")
+    logging.info("----- SUMMARY for %s -----", out_path.name)
+    logging.info("INSERT groups (after aggregation): %d", total_insert_groups)
+    logging.info("CSV written to: %s", out_path)
 
 def _norm_cat(s: str) -> str:
     s = (s or "").strip()
@@ -1110,7 +1070,7 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
         for r in insert_rows:
             key = (r["block_name"], "PLANNER" if FORCE_PLANNER_CATEGORY else r["layer"], r.get("zone",""))
             g = groups.setdefault(key, {"count":0,"xs":[],"ys":[], "preview": r.get("preview_b64",""),
-                                        "category1": r.get("category1",""), "desc": r.get("description","")})
+                                        "category1": r.get("category1","")})
             g["count"] += 1
             try:
                 if r["bbox_length"] and r["bbox_width"]:
@@ -1118,8 +1078,6 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
                     g["ys"].append(float(r["bbox_width"]))
             except Exception:
                 pass
-            if (not g.get("desc")) and r.get("description"):
-                g["desc"] = r.get("description","")
         for (name, layer, zone_name), g in groups.items():
             xs = sorted(g["xs"]); ys = sorted(g["ys"])
             bx = xs[len(xs)//2] if xs else None
@@ -1128,8 +1086,7 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
                 "INSERT", "count", float(g["count"]),
                 block_name=name, layer=layer, handle="",
                 remarks=f"aggregated {g['count']} inserts", bbox_length=bx, bbox_width=by,
-                preview_b64=g.get("preview",""), zone=zone_name, category1=g.get("category1",""),
-                description=g.get("desc","")
+                preview_b64=g.get("preview",""), zone=zone_name, category1=g.get("category1","")
             ))
     else:
         rows.extend(insert_rows)
@@ -1143,13 +1100,12 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
     sort_rows_for_category_blocks(rows)
 
     out_path = derive_out_path(dxf_path, out_dir)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     write_csv(rows, out_path)
     logging.info("CSV written to: %s", out_path)
     return rows
 
 def main():
-    ap = argparse.ArgumentParser(description="DXF → CSV + Sheets upload (previews + zones + category1 + description).")
+    ap = argparse.ArgumentParser(description="DXF → CSV + Sheets upload (previews + PLANNER zones + category1).")
     ap.add_argument("--dxf"); ap.add_argument("--name")
     ap.add_argument("--decimals", type=int, default=None)
     ap.add_argument("--out-dir"); ap.add_argument("--out")
@@ -1166,7 +1122,8 @@ def main():
     ap.add_argument("--align-middle", action="store_true")
     ap.add_argument("--sparse-anchor", choices=["first","last","middle"], default="last")
     ap.add_argument("--drive-folder-id", default=None)
-    ap.add_argument("--unitless-units", choices=["m","cm","mm","in","ft"], default="m")
+    ap.add_argument("--unitless-units", choices=["m","cm","mm","in","ft"], default="m",
+                    help="Interpretation for $INSUNITS=0 drawings (default m/unit).")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -1233,15 +1190,14 @@ def main():
             rows = process_one_dxf(f, out_dir, args.target_units, args.include_xrefs,
                                    layer_metrics, aggregate_inserts, args.layer_metrics_mode,
                                    unitless_units=args.unitless_units)
-            all_rows.extend(rows or []
-            )
+            all_rows.extend(rows or [])
         except Exception as ex:
             logging.exception("Failed processing %s: %s", f, ex)
 
     if all_rows and gs_webapp and gsheet_id:
         detail_rows, layer_rows = split_rows_for_upload(all_rows)
         if detail_rows:
-            push_rows_to_webapp(detail_rows, gs_webapp, gsheet_id, gsheet_tab, gsheet_mode, "",
+            push_rows_to_webapp(detail_rows, gs_webapp, gsheet_id, gsheet_tab, gsheet_mode, "", 
                                 batch_rows=batch_rows, valign_middle=align_middle,
                                 sparse_anchor=sparse_anchor, drive_folder_id=drive_folder_id)
         if layer_rows:

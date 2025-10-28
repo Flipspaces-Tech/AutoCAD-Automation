@@ -19,8 +19,8 @@ from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
 # ====== DEFAULT PATHS (edit if you want zero CLI typing) ======
-DXF_FOLDER = r"C:\Users\admin\Downloads\VIZ-AUTOCAD\DXF"
-OUT_ROOT   = r"C:\Users\admin\Downloads\VIZ-AUTOCAD\EXPORTS"
+DXF_FOLDER = r"C:\Users\admin\Documents\VIZ_AUTOCAD_NEW\DXF"
+OUT_ROOT   = r"C:\Users\admin\Documents\VIZ_AUTOCAD_NEW\EXPORTS"
 # ===============================================================
 
 # What to export

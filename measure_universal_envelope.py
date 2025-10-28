@@ -21,6 +21,7 @@ from ezdxf.entities import DXFGraphic, Insert
 from ezdxf.math import Vec2
 from shapely.geometry import LineString, MultiLineString
 from shapely.ops import unary_union, polygonize
+import typing  # add this near the top
 
 # ======= Default Paths (edit) =======
 DEFAULT_DXF_FOLDER = r"C:\Users\admin\Documents\VIZ_AUTOCAD_NEW\DXF"

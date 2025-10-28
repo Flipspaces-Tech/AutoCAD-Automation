@@ -1,0 +1,9 @@
+[INFO] Found 12 candidate images. Uploading in batches of 100...
+[DEBUG] Example normalized keys:
+  'CabinTable_L-Shaped_L7ft_D4ft__001' -> 'cabintablelshapedl7ftd4ft001'
+  'Door_Glass__001' -> 'doorglass001'
+  'MeetingTable_Rectangular_L4ft__001' -> 'meetingtablerectangularl4ft001'
+  'TaskChair_HighBackrest__001' -> 'taskchairhighbackrest001'
+  'TaskChair_MedBackrest__001' -> 'taskchairmedbackrest001'
+Batch 1: matched 11, wrote 11
+Done. Total matched names: 11, previews written: 11

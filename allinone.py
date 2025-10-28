@@ -10,7 +10,7 @@
 """
 Local → Sheets Preview linker (FULL)
 - Scans LOCAL folder for images (png/jpg/jpeg/webp).
-- Matches file basename to "BOQ name" in Sheet (same normalization as Apps Script).
+- Matches file basename to "BOQ name" in Sheet (same normalization as Apps Script). 
 - Sends images as base64 to your Web App (op=previewByName).
 """ 
 
@@ -22,9 +22,9 @@ import requests
 CONFIG = {
     "WEBAPP_URL": "https://script.google.com/macros/s/AKfycbwTTg9SzLo70ICTbpr2a5zNw84CG6kylNulVONenq4BADQIuCq7GuJqtDq7H_QfV0pe/exec",
     "SHEET_ID":   "12AsC0b7_U4dxhfxEZwtrwOXXALAnEEkQm5N8tg_RByM",
-    "TAB":        "Test file",
+    "TAB":        "CRED_UPDATED",
     "DRIVE_FOLDER_ID": "",  # optional; leave "" to let Web App create/use "DXF-Previews"-
-    "LOCAL_DIR":  r"C:\Users\admin\Downloads\VIZ-AUTOCAD\EXPORTS\TEST FILE\INSTANCES",
+    "LOCAL_DIR":  r"C:\Users\admin\Documents\VIZ_AUTOCAD_NEW\EXPORTS\cred_updated\INSTANCES",
     "BATCH":      100,
     "TIMEOUT":    300,
 }

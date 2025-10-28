@@ -1,0 +1,20 @@
+Scanning C:\Users\admin\Downloads\VIZ-AUTOCAD\DXF | Output C:\Users\admin\Downloads\VIZ-AUTOCAD\EXPORTS | Size 256px | Stroke black
+
+Processing jhsaihdisuahdsod.dxf …
+ Instances done: 0
+ (Auto-clusters skipped in shortened code for brevity)
+
+Processing TEST FILE.dxf …
+ X Instance Workstation_Linear_L4ft failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_MedBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance Door_Glass failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance MeetingTable_Rectangular_L4ft failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_MedBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_MedBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_MedBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_MedBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_MedBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance TaskChair_HighBackrest failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ X Instance CabinTable_L-Shaped_L7ft_D4ft failed: 'charmap' codec can't encode character '\u2713' in position 1: character maps to <undefined>
+ Instances done: 11
+ (Auto-clusters skipped in shortened code for brevity)

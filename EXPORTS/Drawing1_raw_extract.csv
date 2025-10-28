@@ -1,0 +1,5 @@
+entity_type,category,zone,category1,BOQ name,qty_type,qty_value,length (ft),width (ft),perimeter,area (ft2),Description,Preview,remarks
+LAYER_SUMMARY,0,,,,layer,,6.36,2.96,18.64,18.84,,,CLOSED (rectangle): length/width + perimeter & area
+INSERT,PLANNER,,0,newr,count,2.00,3.28,1.33,,,this is a rectangle,,aggregated 2 inserts
+INSERT,PLANNER,,0,test2,count,1.00,0.00,0.00,,,This is an attribute message,,aggregated 1 inserts
+INSERT,PLANNER,,0,testing,count,1.00,0.00,0.00,,,This is another new message,,aggregated 1 inserts

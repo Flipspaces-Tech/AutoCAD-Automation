@@ -1,0 +1,10 @@
+INFO: Processing DXF: C:\Users\admin\Downloads\VIZ-AUTOCAD\DXF\jhsaihdisuahdsod.dxf
+INFO: DWG $INSUNITS: 1
+INFO: Detected $INSUNITS=1 \u2192 0.0254 m/unit
+INFO: CSV written to: C:\Users\admin\Downloads\VIZ-AUTOCAD\EXPORTS\jhsaihdisuahdsod_raw_extract.csv
+INFO: Processing DXF: C:\Users\admin\Downloads\VIZ-AUTOCAD\DXF\TEST FILE.dxf
+INFO: DWG $INSUNITS: 1
+INFO: Detected $INSUNITS=1 \u2192 0.0254 m/unit
+INFO: CSV written to: C:\Users\admin\Downloads\VIZ-AUTOCAD\EXPORTS\TEST FILE_raw_extract.csv
+INFO: WebApp batch 1: uploaded 6/6 rows
+INFO: WebApp batch 1: uploaded 8/8 rows

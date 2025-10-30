@@ -1,0 +1,7 @@
+entity_type,category,zone,category1,BOQ name,qty_type,qty_value,length (ft),width (ft),perimeter,area (ft2),Description,Preview,remarks
+LAYER_SUMMARY,glass,Zone 01,,,layer,,0.57,,,,,,OPEN length only
+LAYER_SUMMARY,glass,Zone 02,,,layer,,0.22,,,,,,OPEN length only
+LAYER_SUMMARY,PLANNER,Zone 01,,,layer,,,,0.83,0.06,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,PLANNER,Zone 02,,,layer,,,,0.83,0.06,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,wall,Zone 01,,,layer,,,,0.74,0.04,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,wall,Zone 02,,,layer,,,,0.74,0.04,,,CLOSED (rectangle): length/width + perimeter & area

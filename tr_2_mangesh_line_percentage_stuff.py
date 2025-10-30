@@ -1,7 +1,3 @@
-##2##
-
-
-
 #!/usr/bin/env python3
 # DXF → CSV + Google Sheets (Apps Script Web App)
 # - Aggregates INSERTs by (block_name, PLANNER, zone) using median bbox (L/W)
@@ -13,6 +9,11 @@
 # - Upgrades:
 #     * Oriented (angle-aware) bbox for INSERT length/width
 #     * Safe handling of $INSUNITS=0 via --unitless-units
+#     * Description column:
+#         - Prefer ATTRIB tags: DESC / DESCRIPTION / NOTE / REM / REMARK / INFO
+#         - Fallback to BlockRecord.dxf.description
+#         - Last resort to ATTDEF default text in the block definition
+#     * NEW: ByLayer rows are zone-aware → a Zone column appears and totals are per (layer, zone)
 
 from __future__ import annotations
 import argparse, csv, uuid, time, math, logging, io, base64
@@ -34,24 +35,35 @@ OUT_ROOT   = r"C:\Users\admin\Documents\VIZ_AUTOCAD_NEW\EXPORTS"
 
 GS_WEBAPP_URL       = "https://script.google.com/macros/s/AKfycbzdajkMohJJnWwbCKLQIp6imQe8VYCkkLQD4fB1sa0_2MfN7yhPONo8j3IacxIWna8u/exec"
 GSHEET_ID           = "12AsC0b7_U4dxhfxEZwtrwOXXALAnEEkQm5N8tg_RByM"
-GSHEET_TAB          = "fsdfdfdsf"
+GSHEET_TAB          = "CRED_UPDATED"
 GSHEET_SUMMARY_TAB  = ""       # blank → auto "<GSHEET_TAB>_ByLayer"
 GSHEET_MODE         = "replace"
-GS_DRIVE_FOLDER_ID  = "" 
+GS_DRIVE_FOLDER_ID  = ""
+
+# Which attribute tags we consider as "description"
+DESC_TAGS = {"DESC", "DESCRIPTION", "NOTE", "REM", "REMARK", "INFO", "META_DESC"}
 
 # ========== Headers ==========
 CSV_HEADERS = [
     "entity_type","category","zone","category1",
-    "BOQ name","qty_type","qty_value","length (ft)","width (ft)","perimeter","area (ft2)","Preview","remarks"
+    "BOQ name","qty_type","qty_value",
+    "length (ft)","width (ft)","perimeter","area (ft2)",
+    "Description",
+    "Preview","remarks"
 ]
 
 DETAIL_HEADERS = [
     "entity_type","category","zone","category1",
-    "BOQ name","qty_type","qty_value","length (ft)","width (ft)","Preview","remarks"
+    "BOQ name","qty_type","qty_value",
+    "length (ft)","width (ft)",
+    "Description",
+    "Preview","remarks"
 ]
 
+# NOTE: Layer headers now include a Zone column
 LAYER_HEADERS = [
-    "entity_type","category","qty_type","length (ft)","width (ft)","perimeter","area (ft2)","Preview","remarks"
+    "entity_type","category","zone","qty_type",
+    "length (ft)","width (ft)","perimeter","area (ft2)","Preview","remarks"
 ]
 
 # ===== Formatting & switches =====
@@ -59,40 +71,23 @@ DEC_PLACES = 2
 FORCE_PLANNER_CATEGORY = True
 
 # ===== Utilities =====
-def make_run_id() -> str:
-    ts = time.strftime("%Y%m%d-%H%M"); rnd = uuid.uuid4().hex[:6]
-    return f"r{ts}-{rnd}"
-
 def layer_or_misc(name: str) -> str:
     s = (name or "").strip()
     return s if s else "misc"
 
 def units_scale_to_meters(doc, unitless_units: str = "m") -> float:
-    """Meters per drawing unit. Unitless drawings use --unitless-units (default m)."""
     try:
         code = int(doc.header.get("$INSUNITS", 0) or 0)
     except Exception:
         code = 0
-
-    mapping = {
-        1: 0.0254,   # inches → m
-        2: 0.3048,   # feet   → m
-        4: 0.001,    # mm     → m
-        5: 0.01,     # cm     → m
-        6: 1.0,      # m      → m
-    }
-
+    mapping = {1:0.0254, 2:0.3048, 4:0.001, 5:0.01, 6:1.0}
     if code in mapping:
         scale = mapping[code]
         logging.info("Detected $INSUNITS=%s → %s m/unit", code, scale)
         return scale
-
     unitless_map = {"m":1.0, "cm":0.01, "mm":0.001, "in":0.0254, "ft":0.3048}
     scale = unitless_map.get((unitless_units or "m").lower().strip(), 1.0)
-    logging.warning(
-        "Unitless/unknown $INSUNITS=%s. Assuming %s per unit → %s m/unit.",
-        code, unitless_units, scale
-    )
+    logging.warning("Unitless/unknown $INSUNITS=%s. Assuming %s per unit → %s m/unit.", code, unitless_units, scale)
     return scale
 
 def to_target_units(v_m: float, target: str, kind: str) -> float:
@@ -227,7 +222,6 @@ def _convex_hull(points: list[tuple[float,float]]) -> list[tuple[float,float]]:
     return lower[:-1] + upper[:-1]
 
 def _oriented_bbox_lengths(points: list[tuple[float,float]]) -> tuple[float,float]:
-    """Return (L, W) of the minimum-area rectangle enclosing points (object-aligned)."""
     if not points:
         return (0.0, 0.0)
     hull = _convex_hull(points)
@@ -267,7 +261,6 @@ def _oriented_bbox_lengths(points: list[tuple[float,float]]) -> tuple[float,floa
     return best_dims
 
 def _bbox_of_insert_xy(ins) -> Optional[Tuple[float,float]]:
-    """Return oriented (L,W) using minimum-area rectangle of all virtual-entity points."""
     try:
         pts = []
         for ve in ins.virtual_entities():
@@ -349,7 +342,6 @@ class Zone:
 
 def _collect_planner_zones(msp) -> list[Zone]:
     zones: list[Zone] = []
-    # A) PLANNER INSERTs: bbox polygon & name from ATTRIB or block name
     for ins in msp.query('INSERT[layer=="PLANNER"]'):
         try:
             b = _insert_bbox(ins)
@@ -372,7 +364,6 @@ def _collect_planner_zones(msp) -> list[Zone]:
             zones.append(Zone(name=zname, poly=poly))
         except Exception:
             pass
-
     if zones:
         seen = set(); out=[]
         for z in zones:
@@ -381,7 +372,6 @@ def _collect_planner_zones(msp) -> list[Zone]:
                 out.append(z); seen.add(key)
         return out
 
-    # B) Closed PLANNER LWPOLYLINEs + nearest label
     tmp: list[Zone] = []
     for e in msp.query('LWPOLYLINE[layer=="PLANNER"]'):
         try:
@@ -430,12 +420,83 @@ def _zone_for_point(pt: tuple[float,float], zones: list[Zone]) -> Optional[str]:
             return z.name
     return None
 
+# ---- Representative point helpers for zone mapping of layer metrics ----
+def _centroid_of_points(pts: list[tuple[float,float]]) -> tuple[float,float]:
+    if not pts: return (0.0, 0.0)
+    sx = sum(p[0] for p in pts); sy = sum(p[1] for p in pts)
+    n = len(pts)
+    return (sx / n, sy / n)
+
+def _repr_point_for_entity(e) -> Optional[tuple[float,float]]:
+    et = e.dxftype()
+    try:
+        if et == "LINE":
+            x1,y1 = float(e.dxf.start.x), float(e.dxf.start.y)
+            x2,y2 = float(e.dxf.end.x),   float(e.dxf.end.y)
+            return ((x1+x2)*0.5, (y1+y2)*0.5)
+        elif et == "ARC":
+            return (float(e.dxf.center.x), float(e.dxf.center.y))
+        elif et == "CIRCLE":
+            return (float(e.dxf.center.x), float(e.dxf.center.y))
+        elif et == "LWPOLYLINE":
+            verts = list(e)
+            if not verts: return None
+            closed = bool(getattr(e,"closed",False))
+            dense = []
+            n = len(verts)
+            for i in range(n if closed else n-1):
+                j = (i+1) % n
+                try: b = float(verts[i][4])
+                except Exception: b = 0.0
+                seg = _bulge_arc_points(
+                    (float(verts[i][0]), float(verts[i][1])),
+                    (float(verts[j][0]), float(verts[j][1])), b
+                )
+                dense.extend(seg[:-1])
+            dense.append((float(verts[-1][0]), float(verts[-1][1])))
+            return _centroid_of_points(dense)
+        elif et == "POLYLINE":
+            vs = list(e.vertices())
+            if not vs: return None
+            pts=[]
+            for v in vs:
+                loc=getattr(v.dxf,"location",None)
+                pts.append((float(loc.x),float(loc.y)) if loc is not None
+                           else (float(getattr(v.dxf,"x",0.0)), float(getattr(v.dxf,"y",0.0))))
+            return _centroid_of_points(pts)
+        elif et == "HATCH":
+            paths = getattr(e, "paths", None)
+            pts=[]
+            if paths:
+                for path in paths:
+                    verts = getattr(path, "polyline_path", None)
+                    if verts:
+                        for v in verts:
+                            x = float(getattr(v, "x", v[0]))
+                            y = float(getattr(v, "y", v[1]))
+                            pts.append((x,y))
+            if pts:
+                minx=min(p[0] for p in pts); maxx=max(p[0] for p in pts)
+                miny=min(p[1] for p in pts); maxy=max(p[1] for p in pts)
+                return ((minx+maxx)*0.5, (miny+maxy)*0.5)
+            return None
+    except Exception:
+        return None
+    return None
+
+def _zone_for_entity(e, zones: list[Zone]) -> str:
+    pt = _repr_point_for_entity(e)
+    if pt is None: return ""
+    z = _zone_for_point(pt, zones)
+    return z or ""
+
 # ===== Row builder =====
 def make_row(entity_type, qty_type, qty_value,
              block_name="", layer="", handle="", remarks="",
              bbox_length=None, bbox_width=None,
              preview_b64:str="", preview_hex:str="",
-             perimeter=None, area=None, zone:str="", category1:str="") -> dict:
+             perimeter=None, area=None, zone:str="", category1:str="",
+             description:str="") -> dict:
     return {
         "entity_type": entity_type, "qty_type": qty_type,
         "qty_value": _fmt_num(qty_value),
@@ -450,6 +511,7 @@ def make_row(entity_type, qty_type, qty_value,
         "preview_hex": preview_hex or "",
         "perimeter": _fmt_num(perimeter),
         "area": _fmt_num(area),
+        "description": description or ""
     }
 
 # ===== Previews (Detail) =====
@@ -655,6 +717,41 @@ def _dominant_layer_rgb_map(msp, base_layer_rgb: Dict[str, tuple[int,int,int]], 
             out[ly] = max(hist.items(), key=lambda kv: kv[1])[0]
     return out
 
+# ===== Description helpers =====
+def _description_from_insert(ins) -> str:
+    try:
+        for att in getattr(ins, "attribs", lambda: [])() or []:
+            tag = (getattr(att.dxf, "tag", "") or "").upper()
+            if tag in DESC_TAGS:
+                txt = (getattr(att.dxf, "text", "") or "").strip()
+                if txt:
+                    return txt
+    except Exception:
+        pass
+    return ""
+
+def _description_from_blockrecord(msp, base_name: str) -> str:
+    try:
+        if base_name and hasattr(msp, "doc") and base_name in msp.doc.blocks:
+            blkrec = msp.doc.blocks.get(base_name)
+            return (getattr(getattr(blkrec, "dxf", None), "description", "") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+def _attdef_default_for_desc(msp, base_name: str) -> str:
+    try:
+        if base_name and hasattr(msp, "doc") and base_name in msp.doc.blocks:
+            blk = msp.doc.blocks.get(base_name)
+            for e in blk:
+                if e.dxftype() == "ATTDEF":
+                    tag = (getattr(e.dxf, "tag", "") or "").upper()
+                    if tag in DESC_TAGS:
+                        return (getattr(e.dxf, "text", "") or "").strip()
+    except Exception:
+        pass
+    return ""
+
 # ===== Rows: INSERT detail =====
 def iter_block_rows(msp, include_xrefs: bool,
                     scale_to_m: float, target_units: str,
@@ -664,11 +761,20 @@ def iter_block_rows(msp, include_xrefs: bool,
     for ins in msp.query("INSERT"):
         try:
             ly = getattr(ins.dxf, "layer", "")
-            if layer_or_misc(ly).upper() == "PLANNER":  # skip zone rectangles
+            if layer_or_misc(ly).upper() == "PLANNER":
                 continue
+
             name = getattr(ins, "effective_name", None) or getattr(ins, "block_name", None) or getattr(ins.dxf, "name", "")
-            if not include_xrefs and ("|" in (name or "")):  # skip xrefs
+            base_name = name
+            if not include_xrefs and ("|" in (name or "")):
                 continue
+
+            desc_txt = _description_from_insert(ins)
+            if not desc_txt:
+                desc_txt = _description_from_blockrecord(msp, base_name)
+            if not desc_txt:
+                desc_txt = _attdef_default_for_desc(msp, base_name)
+
             bbox_du = _bbox_of_insert_xy(ins)
             if bbox_du:
                 L_m = bbox_du[0] * scale_to_m; W_m = bbox_du[1] * scale_to_m
@@ -697,45 +803,51 @@ def iter_block_rows(msp, include_xrefs: bool,
                 preview_b64=preview_cache.get(name, ""),
                 zone=center_zone,
                 category1=(ly or "").strip().lower(),
-                remarks=remarks_txt
+                remarks=remarks_txt,
+                description=desc_txt
             ))
         except Exception as ex:
             logging.exception("INSERT failed: %s", ex)
     return out
 
-# ===== Layer metrics =====
-def compute_layer_metrics(msp, scale_to_m: float, target_units: str):
-    open_len_by_layer: Dict[str, float] = {}
-    peri_by_layer:     Dict[str, float] = {}
-    area_by_layer:     Dict[str, float] = {}
+# ===== Layer metrics (ZONE-AWARE) =====
+def compute_layer_metrics(msp, scale_to_m: float, target_units: str, zones: list[Zone]):
+    # Totals keyed by (layer, zone)
+    open_len: Dict[tuple[str,str], float] = {}
+    peri_by:  Dict[tuple[str,str], float] = {}
+    area_by:  Dict[tuple[str,str], float] = {}
 
-    def add_open_len(layer, L_du):
+    def add_open_len(layer, zone, L_du):
         if L_du <= 0: return
         L_out = to_target_units(L_du * scale_to_m, target_units, "length")
-        k = layer_or_misc(layer)
-        open_len_by_layer[k] = open_len_by_layer.get(k, 0.0) + L_out
+        key=(layer_or_misc(layer), zone or "")
+        open_len[key] = open_len.get(key, 0.0) + L_out
 
-    def add_perimeter(layer, P_du):
+    def add_perimeter(layer, zone, P_du):
         if P_du <= 0: return
         P_out = to_target_units(P_du * scale_to_m, target_units, "length")
-        k = layer_or_misc(layer)
-        peri_by_layer[k] = peri_by_layer.get(k, 0.0) + P_out
+        key=(layer_or_misc(layer), zone or "")
+        peri_by[key] = peri_by.get(key, 0.0) + P_out
 
-    def add_area(layer, A_du):
+    def add_area(layer, zone, A_du):
         if A_du <= 0: return
         A_out = to_target_units(A_du * (scale_to_m**2), target_units, "area")
-        k = layer_or_misc(layer)
-        area_by_layer[k] = area_by_layer.get(k, 0.0) + A_out
+        key=(layer_or_misc(layer), zone or "")
+        area_by[key] = area_by.get(key, 0.0) + A_out
 
+    # LINE
     for e in msp.query("LINE"):
         try:
+            z = _zone_for_entity(e, zones)
             p1=(e.dxf.start.x,e.dxf.start.y); p2=(e.dxf.end.x,e.dxf.end.y)
-            add_open_len(e.dxf.layer, dist2d(p1,p2))
+            add_open_len(e.dxf.layer, z, dist2d(p1,p2))
         except Exception: pass
 
+    # LWPOLYLINE
     for e in msp.query("LWPOLYLINE"):
         try:
-            verts = list(e); 
+            z = _zone_for_entity(e, zones)
+            verts = list(e)
             if not verts: continue
             closed = bool(getattr(e,"closed",False))
             dense=[]; n=len(verts)
@@ -747,18 +859,19 @@ def compute_layer_metrics(msp, scale_to_m: float, target_units: str):
                                       (float(verts[j][0]), float(verts[j][1])), b)
                 dense.extend(seg[:-1])
             dense.append((float(verts[-1][0]), float(verts[-1][1])))
-            if closed: dense.append((float(verts[0][0]), float(verts[0][1])))
             L = polyline_length_xy(dense, closed=False)
             if closed:
-                add_perimeter(e.dxf.layer, L)
+                add_perimeter(e.dxf.layer, z, L)
                 if len(dense) >= 3:
-                    add_area(e.dxf.layer, polygon_area_xy(dense[:-1]))
+                    add_area(e.dxf.layer, z, polygon_area_xy(dense[:-1]))
             else:
-                add_open_len(e.dxf.layer, L)
+                add_open_len(e.dxf.layer, z, L)
         except Exception: pass
 
+    # POLYLINE
     for e in msp.query("POLYLINE"):
         try:
+            z = _zone_for_entity(e, zones)
             vs = list(e.vertices())
             if not vs: continue
             coords=[]
@@ -775,32 +888,37 @@ def compute_layer_metrics(msp, scale_to_m: float, target_units: str):
                 seg=_bulge_arc_points(coords[i], coords[j], b)
                 dense.extend(seg[:-1])
             dense.append(coords[-1])
-            if closed: dense.append(coords[0])
             L = polyline_length_xy(dense, closed=False)
             if closed:
-                add_perimeter(e.dxf.layer, L)
+                add_perimeter(e.dxf.layer, z, L)
                 if len(dense) >= 3:
-                    add_area(e.dxf.layer, polygon_area_xy(dense[:-1]))
+                    add_area(e.dxf.layer, z, polygon_area_xy(dense[:-1]))
             else:
-                add_open_len(e.dxf.layer, L)
+                add_open_len(e.dxf.layer, z, L)
         except Exception: pass
 
+    # ARC
     for e in msp.query("ARC"):
         try:
+            z = _zone_for_entity(e, zones)
             r=float(e.dxf.radius)
             sweep=(float(e.dxf.end_angle)-float(e.dxf.start_angle))%360.0
-            add_open_len(e.dxf.layer, (2.0*math.pi*r)*(sweep/360.0))
+            add_open_len(e.dxf.layer, z, (2.0*math.pi*r)*(sweep/360.0))
         except Exception: pass
 
+    # CIRCLE
     for e in msp.query("CIRCLE"):
         try:
+            z = _zone_for_entity(e, zones)
             r=float(e.dxf.radius)
-            add_perimeter(e.dxf.layer, (2.0*math.pi*r))
-            add_area(e.dxf.layer, math.pi*(r**2))
+            add_perimeter(e.dxf.layer, z, (2.0*math.pi*r))
+            add_area(e.dxf.layer, z, math.pi*(r**2))
         except Exception: pass
 
+    # HATCH (area only)
     for e in msp.query("HATCH"):
         try:
+            z = _zone_for_entity(e, zones)
             A_du=None
             if hasattr(e,"get_filled_area"):
                 try:
@@ -808,10 +926,10 @@ def compute_layer_metrics(msp, scale_to_m: float, target_units: str):
                     if v and v>0: A_du=float(v)
                 except Exception:
                     A_du=None
-            if A_du and A_du>0: add_area(e.dxf.layer, A_du)
+            if A_du and A_du>0: add_area(e.dxf.layer, z, A_du)
         except Exception: pass
 
-    return open_len_by_layer, peri_by_layer, area_by_layer
+    return open_len, peri_by, area_by
 
 def solve_rect_dims_from_perimeter_area(P: float, A: float) -> Tuple[Optional[float], Optional[float]]:
     try:
@@ -832,7 +950,8 @@ def solve_rect_dims_from_perimeter_area(P: float, A: float) -> Tuple[Optional[fl
 def make_layer_total_rows(open_by, peri_by, area_by, layer_rgb: Dict[str, tuple[int,int,int]] | None = None,
                           mode: str = "split"):
     rows = []
-    all_layers = sorted(set(open_by.keys()) | set(peri_by.keys()) | set(area_by.keys()))
+    # keys are (layer, zone)
+    keyset = set(open_by.keys()) | set(peri_by.keys()) | set(area_by.keys())
     layer_rgb = layer_rgb or {}
 
     def hex_for(ly: str) -> str:
@@ -840,32 +959,32 @@ def make_layer_total_rows(open_by, peri_by, area_by, layer_rgb: Dict[str, tuple[
         return _rgb_to_hex(rgb) if rgb else ""
 
     if mode == "combined":
-        for ly in all_layers:
-            L_tot = open_by.get(ly, 0.0) + peri_by.get(ly, 0.0)
-            A_tot = area_by.get(ly, 0.0)
+        for (ly, z) in sorted(keyset):
+            L_tot = open_by.get((ly,z), 0.0) + peri_by.get((ly,z), 0.0)
+            A_tot = area_by.get((ly,z), 0.0)
             rows.append(make_row(
                 "LAYER_SUMMARY","layer",None,
-                layer=ly, remarks="totals per layer (open+closed length; area from closed)",
+                layer=ly, zone=z, remarks="totals per (layer, zone) (open+closed length; area from closed)",
                 bbox_length=(L_tot if L_tot>0 else None),
                 bbox_width=(A_tot if A_tot>0 else None),
                 preview_hex=hex_for(ly),
             ))
         return rows
 
-    for ly in all_layers:
-        if open_by.get(ly, 0.0) > 0:
+    for (ly, z) in sorted(keyset):
+        if open_by.get((ly,z), 0.0) > 0:
             rows.append(make_row(
                 "LAYER_SUMMARY","layer",None,
-                layer=ly, remarks="OPEN length only",
-                bbox_length=open_by[ly], bbox_width=None,
+                layer=ly, zone=z, remarks="OPEN length only",
+                bbox_length=open_by[(ly,z)], bbox_width=None,
                 preview_hex=hex_for(ly),
             ))
-        if peri_by.get(ly, 0.0) > 0 or area_by.get(ly, 0.0) > 0:
-            P = peri_by.get(ly, None); A = area_by.get(ly, None)
+        if peri_by.get((ly,z), 0.0) > 0 or area_by.get((ly,z), 0.0) > 0:
+            P = peri_by.get((ly,z), None); A = area_by.get((ly,z), None)
             L_rec, W_rec = solve_rect_dims_from_perimeter_area(P, A)
             rows.append(make_row(
                 "LAYER_SUMMARY","layer",None,
-                layer=ly, remarks="CLOSED (rectangle): length/width + perimeter & area",
+                layer=ly, zone=z, remarks="CLOSED (rectangle): length/width + perimeter & area",
                 bbox_length=L_rec, bbox_width=W_rec,
                 perimeter=P, area=A,
                 preview_hex=hex_for(ly),
@@ -892,6 +1011,7 @@ def write_csv(rows: list[dict], out_path: Path) -> None:
     CAT_COL    = _find("category")
     ZONE_COL   = _find("zone")
     CAT1_COL   = _find("category1")
+    DESC_COL   = _find("description")
     REM_COL    = _find("remarks")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -911,7 +1031,8 @@ def write_csv(rows: list[dict], out_path: Path) -> None:
                 WIDTH_COL:  r.get("bbox_width",""),
                 PERI_COL:   r.get("perimeter",""),
                 AREA_COL:   r.get("area",""),
-                PREV_COL:   "",  # preview images handled by Web App
+                DESC_COL:   r.get("description",""),
+                PREV_COL:   "",
                 REM_COL:     r.get("remarks",""),
             })
 
@@ -947,6 +1068,7 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
             data_rows = [[
                 r.get("entity_type",""),
                 r.get("layer",""),
+                r.get("zone",""),                 # NEW: zone column in ByLayer
                 r.get("qty_type",""),
                 r.get("bbox_length",""),
                 r.get("bbox_width",""),
@@ -970,6 +1092,7 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
                 r.get("qty_value",""),
                 r.get("bbox_length",""),
                 r.get("bbox_width",""),
+                r.get("description",""),
                 "",
                 r.get("remarks",""),
             ] for r in chunk]
@@ -1001,13 +1124,6 @@ def push_rows_to_webapp(rows: list[dict], webapp_url: str, spreadsheet_id: str,
             raise RuntimeError(f"WebApp upload failed (batch {idx}): HTTP {r.status_code} {r.text}")
         sent += len(data_rows)
         logging.info("WebApp batch %d: uploaded %d/%d rows", idx, sent, total)
-
-# ===== Misc helpers =====
-def print_summary(rows: list[dict], out_path: Path) -> None:
-    total_insert_groups = sum(1 for r in rows if r["entity_type"]=="INSERT" and r["qty_type"]=="count")
-    logging.info("----- SUMMARY for %s -----", out_path.name)
-    logging.info("INSERT groups (after aggregation): %d", total_insert_groups)
-    logging.info("CSV written to: %s", out_path)
 
 def _norm_cat(s: str) -> str:
     s = (s or "").strip()
@@ -1070,7 +1186,7 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
         for r in insert_rows:
             key = (r["block_name"], "PLANNER" if FORCE_PLANNER_CATEGORY else r["layer"], r.get("zone",""))
             g = groups.setdefault(key, {"count":0,"xs":[],"ys":[], "preview": r.get("preview_b64",""),
-                                        "category1": r.get("category1","")})
+                                        "category1": r.get("category1",""), "desc": r.get("description","")})
             g["count"] += 1
             try:
                 if r["bbox_length"] and r["bbox_width"]:
@@ -1078,6 +1194,8 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
                     g["ys"].append(float(r["bbox_width"]))
             except Exception:
                 pass
+            if (not g.get("desc")) and r.get("description"):
+                g["desc"] = r.get("description","")
         for (name, layer, zone_name), g in groups.items():
             xs = sorted(g["xs"]); ys = sorted(g["ys"])
             bx = xs[len(xs)//2] if xs else None
@@ -1086,13 +1204,14 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
                 "INSERT", "count", float(g["count"]),
                 block_name=name, layer=layer, handle="",
                 remarks=f"aggregated {g['count']} inserts", bbox_length=bx, bbox_width=by,
-                preview_b64=g.get("preview",""), zone=zone_name, category1=g.get("category1","")
+                preview_b64=g.get("preview",""), zone=zone_name, category1=g.get("category1",""),
+                description=g.get("desc","")
             ))
     else:
         rows.extend(insert_rows)
 
     if layer_metrics:
-        open_by, peri_by, area_by = compute_layer_metrics(msp, scale_to_m, target_units)
+        open_by, peri_by, area_by = compute_layer_metrics(msp, scale_to_m, target_units, zones)
         base_layer_rgb = _layer_rgb_map(doc)
         dom_layer_rgb  = _dominant_layer_rgb_map(msp, base_layer_rgb, scale_to_m)
         rows.extend(make_layer_total_rows(open_by, peri_by, area_by, layer_rgb=dom_layer_rgb, mode=layer_metrics_mode))
@@ -1100,12 +1219,13 @@ def process_one_dxf(dxf_path: Path, out_dir: Path | None,
     sort_rows_for_category_blocks(rows)
 
     out_path = derive_out_path(dxf_path, out_dir)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     write_csv(rows, out_path)
     logging.info("CSV written to: %s", out_path)
     return rows
 
 def main():
-    ap = argparse.ArgumentParser(description="DXF → CSV + Sheets upload (previews + PLANNER zones + category1).")
+    ap = argparse.ArgumentParser(description="DXF → CSV + Sheets upload (previews + zones + category1 + description + zone-aware ByLayer).")
     ap.add_argument("--dxf"); ap.add_argument("--name")
     ap.add_argument("--decimals", type=int, default=None)
     ap.add_argument("--out-dir"); ap.add_argument("--out")
@@ -1122,8 +1242,7 @@ def main():
     ap.add_argument("--align-middle", action="store_true")
     ap.add_argument("--sparse-anchor", choices=["first","last","middle"], default="last")
     ap.add_argument("--drive-folder-id", default=None)
-    ap.add_argument("--unitless-units", choices=["m","cm","mm","in","ft"], default="m",
-                    help="Interpretation for $INSUNITS=0 drawings (default m/unit).")
+    ap.add_argument("--unitless-units", choices=["m","cm","mm","in","ft"], default="m")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -1197,7 +1316,7 @@ def main():
     if all_rows and gs_webapp and gsheet_id:
         detail_rows, layer_rows = split_rows_for_upload(all_rows)
         if detail_rows:
-            push_rows_to_webapp(detail_rows, gs_webapp, gsheet_id, gsheet_tab, gsheet_mode, "", 
+            push_rows_to_webapp(detail_rows, gs_webapp, gsheet_id, gsheet_tab, gsheet_mode, "",
                                 batch_rows=batch_rows, valign_middle=align_middle,
                                 sparse_anchor=sparse_anchor, drive_folder_id=drive_folder_id)
         if layer_rows:

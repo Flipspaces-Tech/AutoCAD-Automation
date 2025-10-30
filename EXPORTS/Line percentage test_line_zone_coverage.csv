@@ -1,0 +1,5 @@
+dxf_file,line_handle,line_total_len,zone_id,inside_len,inside_pct
+Line percentage test.dxf,,132.744555,R1,69.141772,52.086334
+Line percentage test.dxf,,132.744555,R2,60.164793,45.323737
+Line percentage test.dxf,,68.18697,R2,68.18697,100.0
+Line percentage test.dxf,,69.905684,R1,69.905684,100.0

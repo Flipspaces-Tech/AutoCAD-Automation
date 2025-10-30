@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>DXF Processor</title></head>
+  <body>
+    <h1>Upload DXF</h1>
+    <form id="f">
+      <input type="file" name="file" accept=".dxf" required />
+      <label><input type="checkbox" name="push_to_sheets"> Push to Google Sheets</label>
+      <button type="submit">Process</button>
+    </form>
+    <pre id="log"></pre>
+    <script>
+      const log = (m)=>document.querySelector('#log').textContent += m + "\n";
+      document.querySelector('#f').onsubmit = async (e)=>{
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        log("Uploading...");
+        const res = await fetch("https://YOUR_BACKEND_URL/process",{method:"POST", body:fd});
+        const {job_id} = await res.json();
+        log("Job: " + job_id);
+        let status="queued";
+        while(status!=="done"){
+          await new Promise(r=>setTimeout(r,1500));
+          const s = await fetch(`https://YOUR_BACKEND_URL/status/${job_id}`).then(r=>r.json());
+          status = s.status; log("Status: " + status);
+          if(status==="error"){ log("Error."); return; }
+        }
+        log("Done. Downloading ZIP link...");
+        const dl = `https://YOUR_BACKEND_URL/download/${job_id}`;
+        log(dl);
+      };
+    </script>
+  </body>
+</html>

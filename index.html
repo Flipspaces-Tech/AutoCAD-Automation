@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DXF → Google Sheets Uploader</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 24px; }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .card { border: 1px solid #ccc; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input[type="text"], select { width: 100%; padding: 10px 12px; border: 1px solid #bbb; border-radius: 8px; }
+    .drop { border: 2px dashed #888; border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; }
+    .drop.drag { background: rgba(100,100,255,.08); border-color: #5577ee; }
+    .small { color: #666; font-size: 12px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; background: #1f6feb; color: #fff; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+    pre { background: #1115; border: 1px solid #0002; padding: 12px; border-radius: 8px; overflow: auto; max-height: 340px; }
+    .progress { height: 8px; border-radius: 999px; background: #0001; overflow: hidden; }
+    .bar { height: 100%; width: 0%; background: #1f6feb; transition: width .2s ease; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid #ccc;}
+    .row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px;}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>DXF → Google Sheets Uploader</h1>
+
+  <div class="card">
+    <div id="drop" class="drop">
+      <strong>Drop your ASCII DXF here</strong><br/>
+      <span class="small">or click to choose a file (max 20 MB)</span>
+      <div style="margin-top:8px;">
+        <span class="pill">ASCII DXF only</span>
+        <span class="pill">No storage — processed in memory</span>
+      </div>
+      <input id="file" type="file" accept=".dxf" style="display:none" />
+    </div>
+    <div id="fileInfo" class="small" style="margin-top:8px; display:none;"></div>
+    <div class="progress" style="margin-top:12px;"><div id="bar" class="bar"></div></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;font-size:16px">Processing Options</h2>
+    <div class="row">
+      <div>
+        <label for="target_units">Target Units</label>
+        <select id="target_units">
+          <option value="ft" selected>Feet</option>
+          <option value="m">Meters</option>
+          <option value="cm">Centimeters</option>
+          <option value="mm">Millimeters</option>
+          <option value="in">Inches (for unitless)</option>
+        </select>
+      </div>
+      <div>
+        <label for="unitless_units">If $INSUNITS=0, assume</label>
+        <select id="unitless_units">
+          <option value="m">Meters</option>
+          <option value="cm">Centimeters</option>
+          <option value="mm">Millimeters</option>
+          <option value="ft" selected>Feet</option>
+          <option value="in">Inches</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-top:10px;">
+      <div>
+        <label>Include XREFs?</label>
+        <select id="include_xrefs">
+          <option value="false" selected>No</option>
+          <option value="true">Yes</option>
+        </select>
+      </div>
+      <div>
+        <label>Layer Metrics</label>
+        <select id="layer_metrics">
+          <option value="true" selected>On</option>
+          <option value="false">Off</option>
+        </select>
+      </div>
+      <div>
+        <label>Aggregate Inserts</label>
+        <select id="aggregate_inserts">
+          <option value="true" selected>On (median L/W)</option>
+          <option value="false">Off</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row-2" style="margin-top:10px;">
+      <div>
+        <label>Layer Metrics Mode</label>
+        <select id="layer_metrics_mode">
+          <option value="split" selected>Split</option>
+          <option value="combined">Combined</option>
+        </select>
+      </div>
+      <div>
+        <label>Batch Rows</label>
+        <input id="batch_rows" type="text" value="1000" />
+      </div>
+    </div>
+
+    <details style="margin-top:10px;">
+      <summary>Advanced (Sheet overrides & uploader)</summary>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="gsheet_tab">gsheet_tab (optional)</label>
+          <input id="gsheet_tab" type="text" placeholder="Use server default" />
+        </div>
+        <div>
+          <label for="gsheet_summary_tab">gsheet_summary_tab (optional)</label>
+          <input id="gsheet_summary_tab" type="text" placeholder="Defaults to &lt;tab&gt;_ByLayer" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="gsheet_mode">gsheet_mode</label>
+          <select id="gsheet_mode">
+            <option value="">Use server default</option>
+            <option value="replace">replace</option>
+            <option value="append">append</option>
+          </select>
+        </div>
+        <div>
+          <label for="drive_folder_id">drive_folder_id (optional)</label>
+          <input id="drive_folder_id" type="text" placeholder="If your WebApp uses Drive" />
+        </div>
+      </div>
+    </details>
+
+    <div style="margin-top:14px;">
+      <button id="go" class="btn">Upload & Process</button>
+      <span id="status" class="small" style="margin-left:10px;"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;font-size:16px">Server Response</h2>
+    <pre id="out">—</pre>
+    <div id="sheetLinkWrap" style="display:none;margin-top:8px;">
+      <a id="sheetLink" target="_blank" rel="noopener">Open Google Sheet</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const drop = $('drop'), file = $('file'), info = $('fileInfo'), bar = $('bar');
+const go = $('go'), out = $('out'), statusEl = $('status'), sheetLink = $('sheetLink'), sheetWrap = $('sheetLinkWrap');
+
+let pickedFile = null;
+const MAX = 20 * 1024 * 1024;
+
+function setBar(p){ bar.style.width = (p||0) + '%'; }
+function setStatus(s){ statusEl.textContent = s || ''; }
+function showInfo(){
+  if(!pickedFile){ info.style.display = 'none'; return; }
+  const mb = (pickedFile.size/1024/1024).toFixed(2);
+  info.style.display = 'block';
+  info.textContent = `${pickedFile.name} — ${mb} MB`;
+}
+
+drop.addEventListener('click', ()=> file.click());
+drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', ()=> drop.classList.remove('drag'));
+drop.addEventListener('drop', (e)=>{
+  e.preventDefault(); drop.classList.remove('drag');
+  if(e.dataTransfer.files && e.dataTransfer.files[0]){
+    pickedFile = e.dataTransfer.files[0];
+    showInfo();
+  }
+});
+file.addEventListener('change', ()=>{
+  pickedFile = file.files[0] || null;
+  showInfo();
+});
+
+async function upload(){
+  out.textContent = '—';
+  sheetWrap.style.display = 'none';
+  if(!pickedFile){ alert('Please choose a DXF file.'); return; }
+  if(!pickedFile.name.toLowerCase().endsWith('.dxf')){ alert('Please upload a .dxf file.'); return; }
+  if(pickedFile.size > MAX){ alert('File too large (limit 20MB).'); return; }
+
+  // Optional quick binary DXF sniff (ASCII DXF should start with readable text)
+  const head = await pickedFile.slice(0, 32).text().catch(()=> '');
+  if(head.toLowerCase().includes('autocad binary dxf')){
+    alert('Binary DXF is not supported. Please upload an ASCII DXF.'); return;
+  }
+
+  const fd = new FormData();
+  fd.append('file', pickedFile);
+  fd.append('target_units', $('target_units').value);
+  fd.append('unitless_units', $('unitless_units').value);
+  fd.append('include_xrefs', $('include_xrefs').value);
+  fd.append('layer_metrics', $('layer_metrics').value);
+  fd.append('aggregate_inserts', $('aggregate_inserts').value);
+  fd.append('layer_metrics_mode', $('layer_metrics_mode').value);
+  fd.append('batch_rows', $('batch_rows').value || '1000');
+
+  const gtab = $('gsheet_tab').value.trim();
+  const gsum = $('gsheet_summary_tab').value.trim();
+  const gmode= $('gsheet_mode').value.trim();
+  const dfid = $('drive_folder_id').value.trim();
+  if(gtab) fd.append('gsheet_tab', gtab);
+  if(gsum) fd.append('gsheet_summary_tab', gsum);
+  if(gmode) fd.append('gsheet_mode', gmode);
+  if(dfid) fd.append('drive_folder_id', dfid);
+
+  setBar(10);
+  go.disabled = true; setStatus('Uploading…');
+
+  try {
+    const res = await fetch('/process', { method: 'POST', body: fd });
+    setBar(70);
+    if(!res.ok){
+      const t = await res.text();
+      throw new Error(`${res.status} ${res.statusText}: ${t}`);
+    }
+    const json = await res.json();
+    setBar(100);
+    out.textContent = JSON.stringify(json, null, 2);
+
+    // If you set GSHEET_ID as an env on server, you can expose it here via response if desired.
+    // If not, paste your Sheet ID below (or omit the link entirely).
+    if (json && json.sheet_tab && (json.gsheet_id || window.SHEET_ID)) {
+      const sid = json.gsheet_id || window.SHEET_ID;
+      sheetLink.href = `https://docs.google.com/spreadsheets/d/${sid}`;
+      sheetLink.textContent = 'Open Google Sheet';
+      sheetWrap.style.display = 'block';
+    }
+    setStatus('Done.');
+  } catch(err) {
+    out.textContent = String(err);
+    setStatus('Failed.');
+  } finally {
+    go.disabled = false;
+    setTimeout(()=> setBar(0), 800);
+  }
+}
+
+go.addEventListener('click', upload);
+</script>
+</body>
+</html>

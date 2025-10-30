@@ -27,6 +27,17 @@ from ezdxf import colors as ezcolors
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import tempfile, ezdxf
+from ezdxf import recover
+
+
+import os, json
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+
 
 # ===== Defaults you can edit =====
 DXF_FOLDER = r"C:\Users\admin\Documents\VIZ_AUTOCAD_NEW\DXF"
@@ -1249,6 +1260,267 @@ def main():
                                 "replace" if gsheet_mode=="replace" else "append", "",
                                 batch_rows=batch_rows, valign_middle=align_middle,
                                 sparse_anchor=sparse_anchor, drive_folder_id=drive_folder_id)
+
+
+
+def process_doc_from_stream(
+    stream: io.TextIOBase,
+    *,
+    target_units: str = "ft",
+    include_xrefs: bool = False,
+    layer_metrics: bool = True,
+    aggregate_inserts: bool = True,
+    layer_metrics_mode: str = "split",
+    unitless_units: str = "m",
+    gs_webapp_url: Optional[str] = None,
+    gsheet_id: Optional[str] = None,
+    gsheet_tab: Optional[str] = None,
+    gsheet_summary_tab: Optional[str] = None,
+    gsheet_mode: Optional[str] = None,
+    batch_rows: int = 1000,
+    align_middle: bool = False,
+    sparse_anchor: str = "last",
+    drive_folder_id: str = "",
+) -> dict:
+    """
+    Read DXF text from an in-memory stream, compute rows, push to Apps Script WebApp,
+    and return a small JSON summary. No disk writes.
+    """
+    # 1) Read text from the stream
+    dxf_text = stream.read()
+    if not dxf_text or ("AutoCAD Binary DXF" in dxf_text[:64]):
+        raise ValueError("Binary DXF or empty payload. Please upload ASCII DXF.")
+
+    # 2) Parse the doc from text (ASCII DXF)
+
+
+    try:
+        # Try normal ASCII DXF read
+        doc = ezdxf.read(io.StringIO(dxf_text))
+    except ezdxf.DXFStructureError:
+        # Fallback: try to recover (binary or partially corrupt DXF)
+        print("⚠️ Detected binary or mixed DXF — attempting recover()")
+        with tempfile.NamedTemporaryFile("w+b", delete=False, suffix=".dxf") as tmp:
+            tmp.write(dxf_text.encode("latin-1", "ignore"))
+            tmp.flush()
+            doc, auditor = recover.readfile(tmp.name)
+            if auditor.has_errors:
+                print(f"⚠️ DXF recovery completed with {len(auditor.errors)} issues.")
+
+    msp = doc.modelspace()
+
+    # 3) Units & caches
+    scale_to_m = units_scale_to_meters(doc, unitless_units=unitless_units)
+    preview_cache = _build_preview_cache(msp)
+    zones = _collect_planner_zones(msp)
+
+    # 4) Build rows (INSERTs)
+    insert_rows = iter_block_rows(
+        msp, include_xrefs, scale_to_m, target_units, preview_cache, zones
+    )
+
+    # 5) Aggregate (optional)
+    rows: list[dict] = []
+    if aggregate_inserts:
+        groups: Dict[tuple[str,str,str], dict] = {}
+        for r in insert_rows:
+            key = (r["block_name"], "PLANNER" if FORCE_PLANNER_CATEGORY else r["layer"], r.get("zone",""))
+            g = groups.setdefault(key, {"count":0,"xs":[],"ys":[], "preview": r.get("preview_b64",""),
+                                        "category1": r.get("category1",""), "desc": r.get("description","")})
+            g["count"] += 1
+            try:
+                if r["bbox_length"] and r["bbox_width"]:
+                    g["xs"].append(float(r["bbox_length"]))
+                    g["ys"].append(float(r["bbox_width"]))
+            except Exception:
+                pass
+            if (not g.get("desc")) and r.get("description"):
+                g["desc"] = r.get("description","")
+        for (name, layer, zone_name), g in groups.items():
+            xs = sorted(g["xs"]); ys = sorted(g["ys"])
+            bx = xs[len(xs)//2] if xs else None
+            by = ys[len(ys)//2] if ys else None
+            rows.append(make_row(
+                "INSERT","count",float(g["count"]),
+                block_name=name, layer=layer, handle="",
+                remarks=f"aggregated {g['count']} inserts", bbox_length=bx, bbox_width=by,
+                preview_b64=g.get("preview",""), zone=zone_name,
+                category1=g.get("category1",""), description=g.get("desc","")
+            ))
+    else:
+        rows.extend(insert_rows)
+
+    # 6) Layer metrics (optional)
+    layer_rows: list[dict] = []
+    if layer_metrics:
+        open_by, peri_by, area_by = compute_layer_metrics(msp, scale_to_m, target_units)
+        base_layer_rgb = _layer_rgb_map(doc)
+        dom_layer_rgb  = _dominant_layer_rgb_map(msp, base_layer_rgb, scale_to_m)
+        layer_rows = make_layer_total_rows(open_by, peri_by, area_by,
+                                           layer_rgb=dom_layer_rgb, mode=layer_metrics_mode)
+        rows.extend(layer_rows)
+
+    sort_rows_for_category_blocks(rows)
+
+    # 7) Push to Google Sheet via your Apps Script WebApp (env defaults)
+    webapp = (gs_webapp_url or os.getenv("GS_WEBAPP_URL") or GS_WEBAPP_URL).strip()
+    sid    = (gsheet_id or os.getenv("GSHEET_ID") or GSHEET_ID).strip()
+    tab    = (gsheet_tab or os.getenv("GSHEET_TAB") or GSHEET_TAB).strip()
+    sumtab = (gsheet_summary_tab or os.getenv("GSHEET_SUMMARY_TAB") or "").strip()
+    mode   = (gsheet_mode or os.getenv("GSHEET_MODE") or GSHEET_MODE or "replace").strip().lower()
+    dfid   = (drive_folder_id or os.getenv("GS_DRIVE_FOLDER_ID") or "").strip()
+
+    detail_rows, bylayer_rows = split_rows_for_upload(rows)
+
+    uploaded_detail = 0
+    uploaded_layer  = 0
+    if webapp and sid and tab and detail_rows:
+        push_rows_to_webapp(detail_rows, webapp, sid, tab, mode, "",
+                            batch_rows=batch_rows, valign_middle=align_middle,
+                            sparse_anchor=sparse_anchor, drive_folder_id=dfid)
+        uploaded_detail = len(detail_rows)
+
+    # Summary tab: auto “<TAB>_ByLayer” when not specified
+    summary_tab = sumtab if sumtab else (tab + "_ByLayer")
+    if webapp and sid and summary_tab and bylayer_rows:
+        push_rows_to_webapp(bylayer_rows, webapp, sid, summary_tab,
+                            "replace" if mode=="replace" else "append", "",
+                            batch_rows=batch_rows, valign_middle=align_middle,
+                            sparse_anchor=sparse_anchor, drive_folder_id=dfid)
+        uploaded_layer = len(bylayer_rows)
+
+    return {
+        "status": "ok",
+        "uploaded_rows": uploaded_detail + uploaded_layer,
+        "detail_rows": uploaded_detail,
+        "layer_rows": uploaded_layer,
+        "sheet_tab": tab,
+        "summary_tab": summary_tab,
+        "gsheet_id": sid,
+        "units": {"insunits_to_m": scale_to_m, "target_units": target_units, "unitless_units": unitless_units},
+        "flags": {
+            "include_xrefs": include_xrefs,
+            "layer_metrics": layer_metrics,
+            "aggregate_inserts": aggregate_inserts,
+            "layer_metrics_mode": layer_metrics_mode
+        }
+    }
+
+
+
+
+# ------------------ Minimal API (same file) ------------------
+app = FastAPI(title="DXF → Google Sheets (stateless)")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS","*").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve your index.html at /
+@app.get("/", response_class=HTMLResponse)
+def home():
+    try:
+        here = Path(__file__).parent
+        html = (here / "index.html").read_text(encoding="utf-8")
+    except Exception:
+        html = "<h1>DXF → Sheets</h1><p>Place index.html next to this script.</p>"
+    return HTMLResponse(content=html, status_code=200)
+
+# 20 MB guard
+MAX_BYTES = 20 * 1024 * 1024
+
+@app.get("/ping")
+def ping():
+    return {"pong": True}
+
+@app.post("/process")
+async def process_endpoint(
+    file: UploadFile = File(...),
+    target_units: str = Form("ft"),
+    include_xrefs: str = Form("false"),
+    layer_metrics: str = Form("true"),
+    aggregate_inserts: str = Form("true"),
+    layer_metrics_mode: str = Form("split"),
+    unitless_units: str = Form("m"),
+    gsheet_tab: str = Form(None),
+    gsheet_summary_tab: str = Form(None),
+    gsheet_mode: str = Form(None),
+    batch_rows: int = Form(1000),
+    sparse_anchor: str = Form("last"),
+    align_middle: str = Form("false"),
+    drive_folder_id: str = Form(""),
+):
+    # Size limit
+    contents = await file.read()
+    if len(contents) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large (>20MB).")
+
+    # Quick binary sniff
+    head = contents[:64]
+    if b"AutoCAD Binary DXF" in head:
+        raise HTTPException(status_code=415, detail="Binary DXF not supported. Please upload ASCII DXF.")
+
+    # Decode text safely (utf-8 → latin-1 fallback)
+    try:
+        text = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = contents.decode("latin-1")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Unable to decode DXF text (utf-8/latin-1).")
+
+    # Booleans from form
+    def sbool(s): return str(s).strip().lower() in ("1","true","yes","on")
+    try:
+        summary = process_doc_from_stream(
+            io.StringIO(text),
+            target_units=target_units,
+            include_xrefs=sbool(include_xrefs),
+            layer_metrics=sbool(layer_metrics),
+            aggregate_inserts=sbool(aggregate_inserts),
+            layer_metrics_mode=layer_metrics_mode,
+            unitless_units=unitless_units,
+            gsheet_tab=gsheet_tab,
+            gsheet_summary_tab=gsheet_summary_tab,
+            gsheet_mode=gsheet_mode,
+            batch_rows=int(batch_rows),
+            sparse_anchor=sparse_anchor,
+            align_middle=sbool(align_middle),
+            drive_folder_id=drive_folder_id,
+        )
+        return JSONResponse(summary)
+    except ValueError as ve:
+        raise HTTPException(status_code=415, detail=str(ve))
+    except Exception as ex:
+        logging.exception("Processing failed: %s", ex)
+        raise HTTPException(status_code=500, detail=f"Server error: {ex}")
+
+# Run API if env says so (so CLI still works when you want)
+if os.getenv("RUN_AS_API", "").lower() in ("1","true","yes"):
+    # Example: RUN_AS_API=1 uvicorn yourscript:app --host 0.0.0.0 --port 8000
+    pass
+# -------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     main()

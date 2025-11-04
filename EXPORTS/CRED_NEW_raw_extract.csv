@@ -1,0 +1,95 @@
+entity_type,category,zone,category1,BOQ name,qty_type,qty_value,length (ft),width (ft),perimeter,area (ft2),Description,Preview,remarks
+LAYER_SUMMARY,ANTI STATIC FLOORING,,,,layer,,235.64,15.95,503.18,3758.64,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,BLOCK WALL PARTITION,,,,layer,,11.02,,,,,,OPEN length only
+LAYER_SUMMARY,BLOCK WALL PARTITION,,,,layer,,300.88,1.93,605.61,579.89,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,CARPET FLOORING,,,,layer,,134.00,8.96,285.91,1200.27,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,CEILING PROFILE,,,,layer,,20.37,,,,,,OPEN length only
+LAYER_SUMMARY,CEILING PROFILE,,,,layer,,54.68,0.72,110.79,39.13,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,CEILING-GYPSUM,,,,layer,,412.86,13.24,852.20,5466.48,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,Disturbance_Pillar,,,,layer,,1.51,,,,,,OPEN length only
+LAYER_SUMMARY,Disturbance_Pillar,,,,layer,,44.00,0.65,89.30,28.76,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,FACADE WALL,,,,layer,,105.67,0.69,212.71,72.78,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,GLASS BOARD,,,,layer,,17.10,0.03,34.27,0.58,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,GLASS FASCADE PARTITION,,,,layer,,9.98,0.05,20.06,0.51,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,GLASS PARTITION,,,,layer,,31.80,0.25,64.10,7.84,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,GYPSUM FALSE CEILING,,,,layer,,214.87,,,,,,OPEN length only
+LAYER_SUMMARY,GYPSUM FALSE CEILING,,,,layer,,52.67,4.47,114.27,235.19,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,GYPSUM PARTITION,,,,layer,,36.83,,,,,,OPEN length only
+LAYER_SUMMARY,GYPSUM PARTITION 1,,,,layer,,42.62,0.25,85.74,10.65,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,LIGHT PROFILE,,,,layer,,36.14,4.54,81.36,164.03,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,MARBLE PARTITION,,,,layer,,2.86,0.12,5.97,0.35,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,OVERHEAD STORAGE,,,,layer,,17.95,1.57,39.06,28.25,,,CLOSED (rectangle): length/width + perimeter & area
+INSERT,PLANNER,,2 seater sofa,2 SEATER SOFA,count,5.00,105.17,2.67,,,,,aggregated 5 inserts
+INSERT,PLANNER,,aluminium door,Door_Aluminium,count,3.00,2.02,1.99,,,,,aggregated 3 inserts
+INSERT,PLANNER,,center table,cxz,count,1.00,2.42,0.18,,,,,aggregated 1 inserts
+INSERT,PLANNER,,decoratives,Fridge,count,1.00,2.10,1.96,,,,,aggregated 1 inserts
+INSERT,PLANNER,,glass door,GLASS DOOR,count,4.00,3.01,2.97,,,,,aggregated 4 inserts
+INSERT,PLANNER,,high back chair,DiningChair,count,9.00,102.15,2.01,,,,,aggregated 9 inserts
+INSERT,PLANNER,,high back chair,LoungeChair,count,1.00,117.00,2.86,,,,,aggregated 1 inserts
+INSERT,PLANNER,,high back chair,MEETING ROOM TABLE - 6 SEATER - RECTANGLE,count,5.00,37.20,2.22,,,,,aggregated 5 inserts
+INSERT,PLANNER,,light,CIRCLE PANEL LIGHT,count,26.00,0.00,0.00,,,,,aggregated 26 inserts
+INSERT,PLANNER,,restroom,WC,count,2.00,1.31,1.18,,,,,aggregated 2 inserts
+INSERT,PLANNER,,restroom,WashBasin_Round,count,1.00,0.62,0.10,,,,,aggregated 1 inserts
+INSERT,PLANNER,,solid flush door,Door_Flush,count,3.00,3.02,2.98,,,,,aggregated 3 inserts
+INSERT,PLANNER,,storage,REWSAQ,count,1.00,2.18,2.00,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,aluminium door,Door_Aluminium,count,1.00,2.18,2.15,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,blinds,Blinds-Dining1,count,5.00,3.95,0.25,,,,,aggregated 5 inserts
+INSERT,PLANNER,Conference,blinds,Blinds-Dining2,count,5.00,3.95,0.25,,,,,aggregated 5 inserts
+INSERT,PLANNER,Conference,custom carpentery,CrockeryStorage,count,1.00,6.04,2.01,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,custom carpentery,HandwashArea,count,1.00,6.12,2.02,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,custom carpentery,ServiceCounter,count,1.00,6.08,2.01,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,decoratives,PLANTER  - BIG,count,1.00,2.22,2.07,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,decoratives,SINK,count,1.00,1.98,1.52,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,glass door,GLASS DOOR,count,2.00,4.03,3.97,,,,,aggregated 2 inserts
+INSERT,PLANNER,Conference,high back chair,DiningChair,count,11.00,1.89,1.52,,,,,aggregated 11 inserts
+INSERT,PLANNER,Conference,light,CIRCLE PANEL LIGHT,count,22.00,0.00,0.00,,,,,aggregated 22 inserts
+INSERT,PLANNER,Conference,light,OrbitRingLight,count,3.00,0.13,0.00,,,,,aggregated 3 inserts
+INSERT,PLANNER,Conference,restroom,WC,count,1.00,1.31,1.18,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,restroom,WashBasin_Round,count,1.00,0.62,0.10,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,start_fs,START,count,1.00,2.00,2.00,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,wall frame,WallFrame2.5ft,count,1.00,2.50,0.08,,,,,aggregated 1 inserts
+INSERT,PLANNER,Conference,workstation,DiningTable-20seater,count,1.00,22.64,4.70,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeArea,2 seater sofa,2 SEATER SOFA,count,2.00,5.42,2.67,,,,,aggregated 2 inserts
+INSERT,PLANNER,LoungeArea,blinds,BLINDS- WAITING AREA,count,1.00,13.31,0.25,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeArea,blinds,BLINDS- WAITING AREA 2,count,1.00,5.27,0.25,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeArea,center table,CENTRE TABLE RECTANGLE,count,2.00,3.00,3.00,,,,,aggregated 2 inserts
+INSERT,PLANNER,LoungeArea,decoratives,PLANTER  - BIG,count,1.00,2.22,2.07,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeArea,light,CIRCLE PANEL LIGHT,count,4.00,0.00,0.00,,,,,aggregated 4 inserts
+INSERT,PLANNER,LoungeArea,light,TRACK LIGHT,count,3.00,8.92,0.25,,,,,aggregated 3 inserts
+INSERT,PLANNER,LoungeArea,side table,SIDE TABLE,count,4.00,0.00,0.00,,,,,aggregated 4 inserts
+INSERT,PLANNER,LoungeArea,wallpaper_diningroom,OrbitDrumCeilingLight,count,2.00,0.17,0.00,,,,,aggregated 2 inserts
+INSERT,PLANNER,LoungeRoom,2 seater sofa,2 SEATER SOFA,count,1.00,5.42,2.67,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,blinds,BLINDS- WAITING AREA 3,count,1.00,12.60,0.25,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,center table,CentreTable_Cyclinde_L4.5ft,count,1.00,3.03,2.51,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,decoratives,PLANTER  - BIG,count,1.00,2.22,2.07,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,glass door,GLASS DOOR,count,1.00,3.02,2.98,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,high back chair,LoungeChair,count,1.00,2.73,2.63,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,light,CIRCLE PANEL LIGHT,count,1.00,0.00,0.00,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,light,HangingLightPill,count,1.00,3.03,2.51,,,,,aggregated 1 inserts
+INSERT,PLANNER,LoungeRoom,wall frame,WallFrame2ft,count,3.00,2.00,0.04,,,,,aggregated 3 inserts
+INSERT,PLANNER,MeetingRoom 1,blinds,BLINDS- MEETING ROOM,count,1.00,9.53,0.25,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 1,high back chair,MEETING ROOM TABLE - 6 SEATER - RECTANGLE,count,2.00,2.22,2.01,,,,,aggregated 2 inserts
+INSERT,PLANNER,MeetingRoom 1,light,SPOT LIGHT,count,4.00,0.00,0.00,,,,,aggregated 4 inserts
+INSERT,PLANNER,MeetingRoom 1,meeting room table,MEETING ROOM TABLE - 6 SEATER,count,1.00,5.00,2.50,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 1,wall frame,WallFrame2ft,count,3.00,2.00,0.04,,,,,aggregated 3 inserts
+INSERT,PLANNER,MeetingRoom 1,wallpaper_diningroom,LightHangingTriangle,count,1.00,1.27,1.17,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 2,blinds,BLINDS-MEETING ROOM 2,count,1.00,11.74,0.25,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 2,glass door,GLASS DOOR,count,1.00,2.60,2.56,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 2,high back chair,MEETING ROOM TABLE - 6 SEATER - RECTANGLE,count,3.00,2.22,2.01,,,,,aggregated 3 inserts
+INSERT,PLANNER,MeetingRoom 2,light,SPOT LIGHT,count,6.00,0.00,0.00,,,,,aggregated 6 inserts
+INSERT,PLANNER,MeetingRoom 2,meeting room table,MEETING ROOM TABLE - 6 SEAT,count,1.00,8.00,3.00,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 2,storage,STRG,count,1.00,11.82,1.51,,,,,aggregated 1 inserts
+INSERT,PLANNER,MeetingRoom 2,wall frame,WallFrame2ft,count,3.00,2.00,0.04,,,,,aggregated 3 inserts
+INSERT,PLANNER,MeetingRoom 2,wallpaper_diningroom,LightAcousticPill,count,1.00,3.62,1.00,,,,,aggregated 1 inserts
+LAYER_SUMMARY,RUG FLOORING,,,,layer,,25.60,3.30,57.80,84.44,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,STORAGE,,,,layer,,1.51,,,,,,OPEN length only
+LAYER_SUMMARY,STORAGE,,,,layer,,1.51,1.51,6.03,2.27,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,VITRIFIED TILE FLOORING,,,,layer,,101.62,7.58,218.40,770.56,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,WALL PANEL- MEETING ROOM,,,,layer,,28.33,0.08,56.83,2.35,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,WALL PANEL- WAITING LOUNGE,,,,layer,,30.76,0.08,61.69,2.56,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,WALL PANEL-DINNING ROOM,,,,layer,,23.74,0.09,47.65,2.02,,,CLOSED (rectangle): length/width + perimeter & area
+LAYER_SUMMARY,WALLPAPER_BREAKOUT,,,,layer,,26.75,,,,,,OPEN length only
+LAYER_SUMMARY,WALLPAPER_DININGROOM,,,,layer,,72.03,,,,,,OPEN length only
+LAYER_SUMMARY,WALLPAPER_MEETINGROOM1,,,,layer,,10.37,,,,,,OPEN length only
+LAYER_SUMMARY,WALLPAPER_MEETINGROOM2,,,,layer,,13.98,,,,,,OPEN length only
+LAYER_SUMMARY,Window,,,,layer,,82.71,,,,,,OPEN length only
